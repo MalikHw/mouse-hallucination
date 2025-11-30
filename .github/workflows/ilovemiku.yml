@@ -1,0 +1,75 @@
+name: Build and Release Crazy Mouse
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: crazy_mouse.exe
+            build_cmd: g++ main.cpp -o crazy_mouse.exe -lgdi32 -luser32 -static -O2
+          - os: ubuntu-latest
+            artifact_name: crazy_mouse_linux
+            build_cmd: g++ main.cpp -o crazy_mouse_linux -lX11 -lXtst -pthread -static-libgcc -static-libstdc++ -O2
+          - os: macos-latest
+            artifact_name: crazy_mouse_macos
+            build_cmd: g++ main.cpp -o crazy_mouse_macos -framework ApplicationServices -framework Carbon -O2
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev
+
+      - name: Build
+        run: ${{ matrix.build_cmd }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate version tag
+        id: version
+        run: |
+          VERSION=$(date +'%Y.%m.%d-%H%M%S')
+          echo "version=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "release_name=Release ${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.release_name }}
+          body: automated build cuz i too fucking poor to get a Macbook and no time to run gcc everytime
+          files: |
+            crazy_mouse.exe/crazy_mouse.exe
+            crazy_mouse_linux/crazy_mouse_linux
+            crazy_mouse_macos/crazy_mouse_macos
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
