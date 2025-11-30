@@ -1,30 +1,37 @@
 #ifdef _WIN32
     #include <windows.h>
+    #include <thread>
+    #include <atomic>
+    #include <chrono>
 #elif __APPLE__
     #include <ApplicationServices/ApplicationServices.h>
     #include <Carbon/Carbon.h>
+    #include <mach-o/dyld.h>
+    #include <thread>
+    #include <atomic>
+    #include <chrono>
+    #include <cstdio>
+    #include <cstdlib>
 #else
     #include <X11/Xlib.h>
-    #include <X11/extensions/XTest.h>
     #include <X11/keysym.h>
     #include <linux/uinput.h>
     #include <fcntl.h>
     #include <unistd.h>
     #include <cstring>
+    #include <thread>
+    #include <atomic>
+    #include <chrono>
+    #include <cstdio>
+    #include <cstdlib>
 #endif
 
-#include <thread>
-#include <atomic>
-#include <chrono>
-#include <cstdio>
-#include <cstdlib>
-
-std::atomic<bool> h(false); // hallucinating state
-std::atomic<bool> r(true);  // running state
+std::atomic<bool> h(false);
+std::atomic<bool> r(true);
 
 #ifdef _WIN32
 void showShit(const char* msg) {
-    MessageBoxA(NULL, msg, "Crazy Mouse", MB_OK | MB_TOPMOST);
+    MessageBoxA(NULL, msg, "Mouse Hallucination", MB_OK | MB_TOPMOST);
     std::thread([](){ std::this_thread::sleep_for(std::chrono::seconds(2)); }).detach();
 }
 
@@ -41,7 +48,7 @@ void fuckWithMouse() {
 }
 
 void listenShit() {
-    RegisterHotKey(NULL, 1, MOD_WIN, 0x53); // Win+S
+    RegisterHotKey(NULL, 1, MOD_WIN, 0x53);
     MSG m;
     while (r && GetMessage(&m, NULL, 0, 0)) {
         if (m.message == WM_HOTKEY) h = !h;
@@ -63,24 +70,15 @@ void askAutoStart() {
     CFStringRef btn1 = CFSTR("Hell Yeah");
     CFStringRef btn2 = CFSTR("Nah");
     
-    CFUserNotificationRef notif = CFUserNotificationCreate(
-        kCFAllocatorDefault, 0, 0, NULL, 
-        CFDictionaryCreate(NULL, 
-            (const void*[]){kCFUserNotificationAlertHeaderKey, kCFUserNotificationAlertMessageKey, 
-                           kCFUserNotificationDefaultButtonTitleKey, kCFUserNotificationAlternateButtonTitleKey},
-            (const void*[]){hdr, msg, btn1, btn2}, 4, NULL, NULL)
-    );
-    
     CFOptionFlags resp = 0;
-    CFUserNotificationReceiveResponse(notif, 0, &resp);
-    CFRelease(notif);
+    CFUserNotificationDisplayAlert(0, 0, NULL, NULL, NULL, hdr, msg, btn1, btn2, NULL, &resp);
     
-    if ((resp & 3) == 0) { // Default button clicked
+    if (resp == kCFUserNotificationDefaultResponse) {
         char path[1024], cmd[2048];
         uint32_t size = sizeof(path);
         if (_NSGetExecutablePath(path, &size) == 0) {
             snprintf(cmd, sizeof(cmd), 
-                "osascript -e 'tell application \"System Events\" to make login item at end with properties {path:\"%s\", hidden:false}' 2>/dev/null",
+                "osascript -e 'tell application \"System Events\" to make login item at end with properties {path:\"%s\", hidden:false}' 2>/dev/null &",
                 path);
             system(cmd);
         }
@@ -184,15 +182,22 @@ void fuckWithMouse() {
     uinput_fd = setupUinput();
     if (uinput_fd < 0) {
         showShit("Failed to setup uinput! Run with sudo or add user to input group");
+        r = false;
         return;
     }
     
     Display* d = XOpenDisplay(NULL);
-    Window root = d ? DefaultRootWindow(d) : 0;
+    if (!d) {
+        showShit("Can't open X display!");
+        r = false;
+        return;
+    }
+    
+    Window root = DefaultRootWindow(d);
     int lx = -9999, ly = -9999, i = 0;
     
     while (r) {
-        if (h && d) {
+        if (h) {
             Window rr, cr;
             int x, y, wx, wy;
             unsigned int mask;
@@ -208,7 +213,7 @@ void fuckWithMouse() {
         }
     }
     
-    if (d) XCloseDisplay(d);
+    XCloseDisplay(d);
     if (uinput_fd >= 0) {
         ioctl(uinput_fd, UI_DEV_DESTROY);
         close(uinput_fd);
@@ -218,6 +223,7 @@ void fuckWithMouse() {
 void listenShit() {
     Display* d = XOpenDisplay(NULL);
     if (!d) return;
+    
     Window root = DefaultRootWindow(d);
     KeyCode ks = XKeysymToKeycode(d, XK_s);
     XGrabKey(d, ks, Mod4Mask, root, False, GrabModeAsync, GrabModeAsync);
@@ -230,6 +236,7 @@ void listenShit() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+    
     XUngrabKey(d, ks, Mod4Mask, root);
     XCloseDisplay(d);
 }
@@ -241,55 +248,6 @@ int main() {
     askAutoStart();
 #else
     showShit("Mouse Hallucination Is Fucking On! Win+S (Super+S) to toggle");
-#endif
-    
-    std::thread t1(listenShit);
-    std::thread t2(fuckWithMouse);
-    t1.join();
-    t2.join();
-    return 0;
-}            int x, y, wx, wy;
-            unsigned int mask;
-            if (XQueryPointer(d, root, &rr, &cr, &x, &y, &wx, &wy, &mask) && (x != lx || y != ly)) {
-                XWarpPointer(d, None, root, 0, 0, 0, 0, 
-                    x + ((i * 17 + 13) % 31 - 15), 
-                    y + ((i * 23 + 7) % 31 - 15));
-                XFlush(d);
-                lx = x; ly = y; i++;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
-    XCloseDisplay(d);
-}
-
-void listenShit() {
-    Display* d = XOpenDisplay(NULL);
-    if (!d) return;
-    Window root = DefaultRootWindow(d);
-    KeyCode ks = XKeysymToKeycode(d, XK_s);
-    XGrabKey(d, ks, Mod4Mask, root, False, GrabModeAsync, GrabModeAsync);
-    XSelectInput(d, root, KeyPressMask);
-    
-    XEvent ev;
-    while (r) {
-        if (XCheckWindowEvent(d, root, KeyPressMask, &ev)) {
-            if (ev.type == KeyPress && ev.xkey.keycode == ks) h = !h;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-    XUngrabKey(d, ks, Mod4Mask, root);
-    XCloseDisplay(d);
-}
-#endif
-
-int main() {
-#ifdef __APPLE__
-    showShit("Crazy Mouse Is Fucking On! Cmd+Shift+Option+S to toggle");
-#else
-    showShit("Crazy Mouse Is Fucking On! Win+S (Super+S) to toggle");
 #endif
     
     std::thread t1(listenShit);
